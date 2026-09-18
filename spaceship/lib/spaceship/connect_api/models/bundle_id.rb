@@ -9,7 +9,6 @@ module Spaceship
       attr_accessor :name
       attr_accessor :seed_id
       attr_accessor :platform
-      attr_accessor :bundle_type
 
       attr_accessor :bundle_id_capabilities
 
@@ -39,10 +38,6 @@ module Spaceship
         return bundle_id_capabilities.any? do |capability|
           capability.is_type?(Spaceship::ConnectAPI::BundleIdCapability::Type::MARZIPAN)
         end
-      end
-
-      def app_clip?
-        bundle_type == BundleType::ON_DEMAND_INSTALL_CAPABLE
       end
 
       #

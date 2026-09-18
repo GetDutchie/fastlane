@@ -103,78 +103,56 @@ module Spaceship
         end
 
         def patch_bundle_id_capability(bundle_id_id:, seed_id:, enabled: false, capability_type:, settings: [], parent_bundle_id_id: nil, capability_id: nil, existing_capabilities: nil)
-          capability_entry = {
-            type: "bundleIdCapabilities",
-            attributes: {
-              enabled: enabled,
-              settings: settings
-            },
-            relationships: {
-              capability: {
-                data: {
-                  type: "capabilities",
-                  id: capability_type
-                }
-              }
-            }
-          }
-          capability_entry[:id] = capability_id if capability_id
-
-          if parent_bundle_id_id
-            capability_entry[:relationships][:parentBundleId] = {
-              data: {
-                type: "bundleIds",
-                id: parent_bundle_id_id
-              }
-            }
-          end
-
-          capability_data = []
-          Array(existing_capabilities).each do |existing|
-            next if existing.nil?
-            next if existing.is_type?(capability_type)
-
-            capability_data << {
-              type: "bundleIdCapabilities",
+          capabilities = Array(existing_capabilities).compact.reject { |existing| existing.is_type?(capability_type) }.map do |existing|
+            bundle_id_capability_payload(
               id: existing.id,
-              attributes: {
-                enabled: true,
-                settings: existing.settings || []
-              },
-              relationships: {
-                capability: {
-                  data: {
-                    type: "capabilities",
-                    id: existing.capability_type || existing.id.split('_').last
-                  }
-                }
-              }
-            }
+              enabled: true,
+              settings: existing.settings || [],
+              capability_type: existing.capability_type || existing.id.split('_').last
+            )
           end
-          capability_data << capability_entry
+          capabilities << bundle_id_capability_payload(
+            id: capability_id,
+            enabled: enabled,
+            settings: settings,
+            capability_type: capability_type,
+            parent_bundle_id_id: parent_bundle_id_id
+          )
 
           body = {
             data: {
               type: "bundleIds",
               id: bundle_id_id,
               attributes: {
-                permissions: {
-                  edit: true,
-                  delete: true
-                },
+                permissions: { edit: true, delete: true },
                 seedId: seed_id,
                 teamId: provisioning_request_client.team_id
               }.compact,
               relationships: {
-                bundleIdCapabilities: {
-                  data: capability_data
-                }
+                bundleIdCapabilities: { data: capabilities }
               }
             }
           }
 
           provisioning_request_client.patch("#{Version::V1}/bundleIds/#{bundle_id_id}", body)
         end
+
+        def bundle_id_capability_payload(enabled:, settings:, capability_type:, id: nil, parent_bundle_id_id: nil)
+          relationships = {
+            capability: { data: { type: "capabilities", id: capability_type } }
+          }
+          if parent_bundle_id_id
+            relationships[:parentBundleId] = { data: { type: "bundleIds", id: parent_bundle_id_id } }
+          end
+
+          {
+            type: "bundleIdCapabilities",
+            id: id,
+            attributes: { enabled: enabled, settings: settings },
+            relationships: relationships
+          }.compact
+        end
+        private :bundle_id_capability_payload
 
         def delete_bundle_id_capability(bundle_id_capability_id:)
           provisioning_request_client.delete("#{Version::V1}/bundleIdCapabilities/#{bundle_id_capability_id}")
