@@ -9,14 +9,20 @@ module Spaceship
       attr_accessor :name
       attr_accessor :seed_id
       attr_accessor :platform
+      attr_accessor :bundle_type
 
       attr_accessor :bundle_id_capabilities
+
+      module BundleType
+        ON_DEMAND_INSTALL_CAPABLE = "onDemandInstallCapable"
+      end
 
       attr_mapping({
         "identifier" => "identifier",
         "name" => "name",
         "seedId" => "seed_id",
         "platform" => "platform",
+        "bundleType" => "bundle_type",
 
         "bundleIdCapabilities" => 'bundle_id_capabilities'
       })
@@ -33,6 +39,10 @@ module Spaceship
         return bundle_id_capabilities.any? do |capability|
           capability.is_type?(Spaceship::ConnectAPI::BundleIdCapability::Type::MARZIPAN)
         end
+      end
+
+      def app_clip?
+        bundle_type == BundleType::ON_DEMAND_INSTALL_CAPABLE
       end
 
       #
@@ -57,11 +67,58 @@ module Spaceship
         return client.get_bundle_id(bundle_id_id: bundle_id_id, includes: includes).first
       end
 
-      def self.create(client: nil, name: nil, platform: nil, identifier: nil, seed_id: nil)
+      # Create a bundle ID.
+      #
+      # For App Clips, pass parent_bundle_id_id (the parent app BundleId id).
+      # Matches @expo/apple-utils BundleId.createAppClipAsync.
+      def self.create(client: nil, name: nil, platform: nil, identifier: nil, seed_id: nil, parent_bundle_id_id: nil)
         client ||= Spaceship::ConnectAPI
-        resp = client.post_bundle_id(name: name, platform: platform, identifier: identifier, seed_id: seed_id)
+
+        # App Clip specific configuration
+        unless parent_bundle_id_id.nil?
+          platform ||= Spaceship::ConnectAPI::Platform::IOS
+          bundle_type = BundleType::ON_DEMAND_INSTALL_CAPABLE
+          capabilities = app_clip_capabilities(parent_bundle_id_id)
+        end
+
+        resp = client.post_bundle_id(
+          name: name,
+          platform: platform,
+          identifier: identifier,
+          seed_id: seed_id,
+          bundle_type: bundle_type,
+          capabilities: capabilities
+        )
         return resp.to_models.first
       end
+
+      # Matches @expo/apple-utils createAppClipAsync + Associated Domains (needed for Clip links)
+      def self.app_clip_capabilities(parent_bundle_id_id)
+        [
+          {
+            type: "bundleIdCapabilities",
+            attributes: { enabled: true, settings: [] },
+            relationships: {
+              capability: {
+                data: { type: "capabilities", id: BundleIdCapability::Type::ON_DEMAND_INSTALL_CAPABLE }
+              },
+              parentBundleId: {
+                data: { type: "bundleIds", id: parent_bundle_id_id }
+              }
+            }
+          },
+          {
+            type: "bundleIdCapabilities",
+            attributes: { enabled: true, settings: [] },
+            relationships: {
+              capability: {
+                data: { type: "capabilities", id: BundleIdCapability::Type::ASSOCIATED_DOMAINS }
+              }
+            }
+          }
+        ]
+      end
+      private_class_method :app_clip_capabilities
 
       #
       # BundleIdsCapabilities
@@ -81,11 +138,18 @@ module Spaceship
         return resp.to_models.first
       end
 
-      def update_capability(capability_type, enabled: false, settings: [], client: nil)
+      def update_capability(capability_type, enabled: false, settings: [], client: nil, parent_bundle_id_id: nil)
         raise "capability_type is required " if capability_type.nil?
 
         client ||= Spaceship::ConnectAPI
-        resp = client.patch_bundle_id_capability(bundle_id_id: id, seed_id: seed_id, enabled: enabled, capability_type: capability_type, settings: settings)
+        resp = client.patch_bundle_id_capability(
+          bundle_id_id: id,
+          seed_id: seed_id,
+          enabled: enabled,
+          capability_type: capability_type,
+          settings: settings,
+          parent_bundle_id_id: parent_bundle_id_id
+        )
         return resp.to_models.first
       end
     end

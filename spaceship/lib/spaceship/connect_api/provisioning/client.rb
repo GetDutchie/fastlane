@@ -39,6 +39,12 @@ module Spaceship
           super(url_or_path, body)
         end
 
+        def patch(url_or_path, body)
+          return proxy_patch(url_or_path, body) if web_session?
+
+          super(url_or_path, body)
+        end
+
         def delete(url_or_path, params = nil)
           # The Provisioning App Store Connect API needs to be proxied through a
           # POST request if using web session
@@ -65,6 +71,21 @@ module Spaceship
           body[:data][:attributes][:teamId] = team_id
 
           response = request(:post) do |req|
+            req.url(url_or_path)
+            req.body = body.to_json
+            req.headers['Content-Type'] = 'application/vnd.api+json'
+            req.headers['X-Requested-With'] = 'XMLHttpRequest'
+          end
+          handle_response(response)
+        end
+
+        def proxy_patch(url_or_path, body)
+          body[:data][:attributes] ||= {}
+          body[:data][:attributes][:teamId] = team_id
+
+          # Cookie-session provisioning accepts real PATCH (same as @expo/apple-utils).
+          # POST + X-HTTP-Method-Override is rejected on bundleIds ("does not support POST").
+          response = request(:patch) do |req|
             req.url(url_or_path)
             req.body = body.to_json
             req.headers['Content-Type'] = 'application/vnd.api+json'

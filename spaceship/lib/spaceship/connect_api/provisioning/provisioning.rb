@@ -31,13 +31,14 @@ module Spaceship
           provisioning_request_client.get("#{Version::V1}/bundleIds/#{bundle_id_id}", params)
         end
 
-        def post_bundle_id(name:, platform:, identifier:, seed_id:)
+        def post_bundle_id(name:, platform: nil, identifier:, seed_id: nil, bundle_type: nil, capabilities: nil)
           attributes = {
             name: name,
-            platform: platform,
             identifier: identifier,
-            seedId: seed_id
-          }
+            platform: platform,
+            seedId: seed_id,
+            bundleType: bundle_type
+          }.compact
 
           body = {
             data: {
@@ -46,6 +47,23 @@ module Spaceship
             }
           }
 
+          capability_data = Array(capabilities).compact
+          if capability_data.any?
+            body[:data][:relationships] = {
+              bundleIdCapabilities: {
+                data: capability_data
+              }
+            }
+          end
+
+          if bundle_type
+            client = provisioning_request_client
+            unless client.respond_to?(:web_session?) && client.web_session?
+              raise "Creating App Clip bundle IDs requires an Apple ID / Developer Portal session (not an App Store Connect API key)"
+            end
+          end
+
+          # Same host as @expo/apple-utils provisioningClient (services-account/v1)
           provisioning_request_client.post("#{Version::V1}/bundleIds", body)
         end
 
@@ -84,7 +102,57 @@ module Spaceship
           provisioning_request_client.post("#{Version::V1}/bundleIdCapabilities", body)
         end
 
-        def patch_bundle_id_capability(bundle_id_id:, seed_id:, enabled: false, capability_type:, settings: [])
+        def patch_bundle_id_capability(bundle_id_id:, seed_id:, enabled: false, capability_type:, settings: [], parent_bundle_id_id: nil, capability_id: nil, existing_capabilities: nil)
+          capability_entry = {
+            type: "bundleIdCapabilities",
+            attributes: {
+              enabled: enabled,
+              settings: settings
+            },
+            relationships: {
+              capability: {
+                data: {
+                  type: "capabilities",
+                  id: capability_type
+                }
+              }
+            }
+          }
+          capability_entry[:id] = capability_id if capability_id
+
+          if parent_bundle_id_id
+            capability_entry[:relationships][:parentBundleId] = {
+              data: {
+                type: "bundleIds",
+                id: parent_bundle_id_id
+              }
+            }
+          end
+
+          capability_data = []
+          Array(existing_capabilities).each do |existing|
+            next if existing.nil?
+            next if existing.is_type?(capability_type)
+
+            capability_data << {
+              type: "bundleIdCapabilities",
+              id: existing.id,
+              attributes: {
+                enabled: true,
+                settings: existing.settings || []
+              },
+              relationships: {
+                capability: {
+                  data: {
+                    type: "capabilities",
+                    id: existing.capability_type || existing.id.split('_').last
+                  }
+                }
+              }
+            }
+          end
+          capability_data << capability_entry
+
           body = {
             data: {
               type: "bundleIds",
@@ -96,26 +164,10 @@ module Spaceship
                 },
                 seedId: seed_id,
                 teamId: provisioning_request_client.team_id
-              },
+              }.compact,
               relationships: {
                 bundleIdCapabilities: {
-                  data: [
-                    {
-                      type: "bundleIdCapabilities",
-                      attributes: {
-                          enabled: enabled,
-                          settings: settings
-                      },
-                      relationships: {
-                        capability: {
-                          data: {
-                              type: "capabilities",
-                              id: capability_type
-                            }
-                        }
-                      }
-                    }
-                  ]
+                  data: capability_data
                 }
               }
             }
